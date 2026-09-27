@@ -1,0 +1,12 @@
+# 同 examples/lark.yml，只是换成一个 83 个成员的英文技能集合。
+- insert:
+    - id: skill-index
+      name: /data/project/dsh-plugin/lib/index.js
+      config:
+        groups:
+          - name: gsd
+            title: GSD 工作流全集
+            description: "GSD（Get Shit Done）阶段化开发工作流入口：里程碑与阶段规划、规格、执行、审计、代码审查、调试、文档更新等 80+ 个子技能。用户提到 GSD、阶段、里程碑、backlog、phase、milestone 时先加载本技能，再按索引取用子技能全文。"
+            dir: "~/.claude/skills"
+            members: "gsd-*"
+            detailHint: "用 read 工具直接读 <dir>/<成员名>/SKILL.md"

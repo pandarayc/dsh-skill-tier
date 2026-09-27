@@ -1,0 +1,23 @@
+# dsh-skill-index bundle patch.
+#
+# Installing this package mounts one plugin row. Give that row a `config.groups`
+# entry per skill collection you want folded into an index — see README「配置」.
+#
+# Without `config.groups` the plugin registers nothing (and says so at info
+# level), so an unconfigured install is inert rather than broken.
+- insert:
+    - id: skill-index
+      name: 'dsh-skill-index'
+      # config:
+      #   revalidateMs: 0          # 0 = 每次 list() 都按内容哈希校验（默认）
+      #   groups:
+      #     - name: lark           # 索引 skill 名，必须 kebab-case
+      #       title: 飞书/Lark 全能力入口
+      #       description: "一句话说清什么时候该加载本索引"
+      #       dir: "~/.dsh/lark-skills"   # 成员目录，不必是 DSH 扫描根
+      #       members: "lark-*"           # glob：* / 前缀* / *后缀 / 精确，可逗号分隔，! 排除
+      #       detailHint: "lark-cli skills read <成员名>"
+      #       rules:
+      #         - "任何飞书操作前先读 lark-shared"
+      #       rank: 300
+      #       source: custom

@@ -1,0 +1,25 @@
+# 用 --patch 直接挂载（不改 profile）：
+#   dsh --profile web --patch examples/lark.yml --dump-config | grep -A2 skill-index
+#
+# 或先装包、再把下面 config 部分写进 profile 的 cordis.patch.yml：
+#   dsh plugin --profile web add /data/project/dsh-plugin
+- insert:
+    - id: skill-index
+      name: /data/project/dsh-plugin/lib/index.js
+      config:
+        groups:
+          - name: lark
+            title: 飞书/Lark 全能力入口
+            description: >-
+              飞书/Lark 全能力入口（28 个子技能）：云文档、电子表格、多维表格 Base、云空间、
+              消息与群聊、日历、会议与妙记、任务、审批、考勤、OKR、通讯录、知识库、画板、
+              幻灯片、邮箱、实时事件订阅、妙搭应用。用户提到飞书/Feishu/Lark 或上述任一能力时
+              先加载本技能，再按索引取用子技能全文；不要凭记忆直接调 lark-cli。
+            dir: "~/.dsh/lark-skills"
+            members: "lark-*"
+            detailHint: "lark-cli skills read <成员名>"
+            rules:
+              - "**先读 `lark-shared`**：身份切换（`--as user/bot`）、权限报错处理、JSON 输出契约、高风险操作确认都在那里。任何飞书操作前都要读。"
+              - "**一次只读你真正需要的那 1–2 个子技能**，读完再动手，不要一次全读。"
+              - "子技能正文由 `lark-cli` 二进制自带，与已装版本严格一致；**不要凭记忆猜参数或 scope**。"
+              - "命令 `--help` 里标 `high-risk-write` 的操作，必须先向用户确认，再加 `--yes`。"
