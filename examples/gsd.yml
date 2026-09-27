@@ -1,7 +1,8 @@
 # 同 examples/lark.yml，只是换成一个 83 个成员的英文技能集合。
+# name 是包名；未装包时换成你的 clone 路径（用法见 examples/lark.yml 头部）。
 - insert:
-    - id: skill-index
-      name: /data/project/dsh-plugin/dsh-skill-index/lib/index.js
+    - id: skill-tier
+      name: '@pandarayc/dsh-skill-tier'
       config:
         groups:
           - name: gsd

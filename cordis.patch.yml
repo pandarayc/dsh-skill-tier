@@ -1,4 +1,4 @@
-# @pandarayc/dsh-skill-index bundle patch.
+# @pandarayc/dsh-skill-tier bundle patch.
 #
 # Installing this package mounts one plugin row. Give that row a `config.groups`
 # entry per skill collection you want folded into an index — see README「配置」.
@@ -11,11 +11,11 @@
 # Without `config.groups` the plugin registers nothing (and says so at info
 # level), so an unconfigured install is inert rather than broken.
 - insert:
-    - id: skill-index
-      name: '@pandarayc/dsh-skill-index'
+    - id: skill-tier
+      name: '@pandarayc/dsh-skill-tier'
       # config:
       #   revalidateMs: 0          # 0 = 每次 list() 都按内容哈希校验（默认）
-      #   providerName: skill-index # 可选：同层唯一
+      #   providerName: skill-tier # 可选：同层唯一
       #   groups:
       #     - name: lark           # 索引 skill 名，必须 kebab-case
       #       title: 飞书/Lark 全能力入口

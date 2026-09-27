@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * skill-index 的行为测试。刻意不依赖任何测试框架：node --test 或直接 node 跑都行。
+ * skill-tier 的行为测试。刻意不依赖任何测试框架：node --test 或直接 node 跑都行。
  *
- *   node test/skill-index.test.mjs
+ *   node test/skill-tier.test.mjs
  *
  * 每个用例自带临时目录，跑完自清。
  */
@@ -45,7 +45,7 @@ function eq(actual, expected, label) {
 }
 
 // ── 工具 ──────────────────────────────────────────────────────────────
-function tmp(prefix = 'skill-index-test-') {
+function tmp(prefix = 'skill-tier-test-') {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 function writeSkill(dir, name, { description = 'D', body = '# body\n', extra = '' } = {}) {
@@ -232,7 +232,7 @@ await testAsync('目录不存在时应给出可观察的告警，而不是静默
 });
 
 await testAsync('索引正文里的取用提示应使用展开后的绝对路径（不是 ~）', async () => {
-  const homeStore = join(homedir(), `.skill-index-test-${process.pid}`);
+  const homeStore = join(homedir(), `.skill-tier-test-${process.pid}`);
   rmSync(homeStore, { recursive: true, force: true });
   try {
     writeSkill(homeStore, 'grp-alpha', { description: 'A' });
@@ -242,7 +242,7 @@ await testAsync('索引正文里的取用提示应使用展开后的绝对路径
     ok(router, '配置里的 ~ 能被解析（因此有候选）');
     const def = await provider.get(router, {});
     ok(def.content.includes(homeStore), '正文提示应是绝对路径', def.content.match(/\`[^\`]*\`/)?.[0] ?? '');
-    ok(!def.content.includes('~/.skill-index-test'), '正文里不应残留 ~');
+    ok(!def.content.includes('~/.skill-tier-test'), '正文里不应残留 ~');
   } finally {
     rmSync(homeStore, { recursive: true, force: true });
   }
@@ -381,8 +381,8 @@ test('providerName：默认值 / 显式值 / 非法值回退 / 保留名回退',
     const g = [{ name: 'grp', title: 'g', description: 'g', dir: store }];
     eq(mount(g).provider.name, DEFAULT_PROVIDER_NAME, '默认 provider 名');
 
-    const named = mount(g, { providerName: 'skill-index-lark' });
-    eq(named.provider.name, 'skill-index-lark', '显式 provider 名生效');
+    const named = mount(g, { providerName: 'skill-tier-lark' });
+    eq(named.provider.name, 'skill-tier-lark', '显式 provider 名生效');
     ok(named.provider.list, '仍然产出 provider');
 
     const badName = mount(g, { providerName: 'Bad_Name' });
@@ -401,8 +401,8 @@ test('providerName：默认值 / 显式值 / 非法值回退 / 保留名回退',
 });
 
 test('注册表报「已注册」时翻译成可操作的提示（保留原因）', () => {
-  const raw = new Error('a skill provider named "skill-index" is already registered in this scope');
-  const translated = explainRegistrationFailure(raw, 'skill-index');
+  const raw = new Error('a skill provider named "skill-tier" is already registered in this scope');
+  const translated = explainRegistrationFailure(raw, 'skill-tier');
   ok(translated !== raw, '应换成一个新错误而不是原样抛出');
   ok(translated.message.includes('只应挂一行'), '要说清正确写法', translated.message);
   ok(translated.message.includes('providerName'), '要给出多行场景的替代方案');
@@ -418,20 +418,20 @@ test('同一 profile 挂两行 → apply 抛出可操作的报错，而不是裸
   const ctx = {
     skills: {
       registerProvider: () => {
-        throw new Error('a skill provider named "skill-index" is already registered');
+        throw new Error('a skill provider named "skill-tier" is already registered');
       },
     },
     logger: { warn: (m) => warnings.push(String(m)), info: () => {} },
   };
   let caught;
   try {
-    apply(ctx, { providerName: 'skill-index' });
+    apply(ctx, { providerName: 'skill-tier' });
   } catch (e) {
     caught = e;
   }
   ok(caught, '应抛出');
   ok(caught?.message.includes('只应挂一行'), '报错要给出修法', caught?.message);
-  ok(caught?.message.includes('skill-index'), '报错要点出冲突的名字');
+  ok(caught?.message.includes('skill-tier'), '报错要点出冲突的名字');
   ok(caught?.cause, '保留原始错误');
 });
 
@@ -454,12 +454,12 @@ test('与 provider 名无关的注册失败应原样抛出，不被改写', () =
   eq(caught, boom, '无关错误应原样抛出');
 });
 
-// ───────────────────────── 工作区层（.dsh/skill-index.json） ─────────────────────────
+// ───────────────────────── 工作区层（.dsh/skill-tier.json） ─────────────────────────
 
 /** 在 cwd 下写一个工作区配置文件。 */
 function writeWorkspace(cwd, content) {
   mkdirSync(join(cwd, '.dsh'), { recursive: true });
-  writeFileSync(join(cwd, '.dsh', 'skill-index.json'), typeof content === 'string' ? content : JSON.stringify(content, null, 2));
+  writeFileSync(join(cwd, '.dsh', 'skill-tier.json'), typeof content === 'string' ? content : JSON.stringify(content, null, 2));
 }
 
 await testAsync('工作区配置能新增集合', async () => {

@@ -1,4 +1,4 @@
-# @pandarayc/dsh-skill-index
+# @pandarayc/dsh-skill-tier
 
 > 让成千上万个 skill 不再每轮都躺在上下文里。**零依赖、单文件、不改源文件。**
 
@@ -17,31 +17,43 @@ Tier 1  模型加载索引     拿到该集合全部成员的路由表（4 KB �
 Tier 2  按路由取正文     只读真正要用的那 1–2 个成员全文          ← 精确命中才付
 ```
 
-**实测削减 96.7%**（28 个成员：**2,901 → 95 tokens**），且**保留模型自主发现能力** —— 成员仍然可以被你 `/成员名` 直接点名加载。
+**实测削减 96%**（28 个成员：**2,901 → 119 tokens**），且**保留模型自主发现能力** —— 成员仍然可以被你 `/成员名` 直接点名加载。
 
 ## 安装
 
 ```bash
-# 装进 profile（bundle 形式，装完自动挂一行）
-dsh plugin --profile web add /data/project/dsh-plugin/dsh-skill-index
+# 从源码
+git clone https://github.com/pandarayc/dsh-skill-tier
+dsh plugin --profile web add "$PWD/dsh-skill-tier"
 
-# 验证
-dsh --profile web --dump-config | grep -A3 skill-index
+# 或从 npm（尚未发布；发布后才可用）
+dsh plugin --profile web add @pandarayc/dsh-skill-tier
+
+# 验证：应看到自动挂上的那一行
+dsh --profile web --dump-config | grep -A3 skill-tier
 ```
 
 **装完是惰性的**：没有配置任何集合时不产出候选、不占上下文。集合可以来自两层（见下）。
 
-不想装包、只想先试：
+`examples/*.yml` 里的 `name:` 写的是**包名**，配合 `--patch` 可以把配置临时叠到已装的包上：
 
 ```bash
-dsh --profile web --patch examples/lark.yml --json "只回复 OK"
+# 已装包：用 examples 的配置覆盖已装那一行
+dsh --profile headless --patch examples/lark.yml "只回复 OK"
+
+# 还没装包：把包名换成你的 clone 路径
+sed "s|'@pandarayc/dsh-skill-tier'|'$PWD/lib/index.js'|" examples/lark.yml > /tmp/lark.local.yml
+dsh --profile headless --patch /tmp/lark.local.yml "只回复 OK"
 ```
+
+> 注意用 `headless`（或任何带任务参数的 app）跑，**不要**用 `--profile web` 配 `--json` ——
+> `--json` 是 headless 的参数，web app 不认。web profile 只用 `--dump-config` 验证挂载。
 
 工作区用法（装完包之后）：
 
 ```bash
 mkdir -p ~/work/feishu/.dsh
-cat > ~/work/feishu/.dsh/skill-index.json <<'JSON'
+cat > ~/work/feishu/.dsh/skill-tier.json <<'JSON'
 { "groups": [{ "name": "lark", "title": "飞书/Lark 全能力入口",
   "description": "飞书/Lark 全能力入口（28 个子技能）…",
   "dir": "~/.dsh/lark-skills", "members": "lark-*",
@@ -54,11 +66,11 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
 
 ```yaml
 - insert:
-    - id: skill-index
-      name: /data/project/dsh-plugin/dsh-skill-index/lib/index.js
+    - id: skill-tier
+      name: '@pandarayc/dsh-skill-tier'   # 未装包时换成 /path/to/dsh-skill-tier/lib/index.js
       config:
         revalidateMs: 0                 # 可选，见下
-        providerName: skill-index       # 可选，同层唯一。见「一个 profile 只挂一行」
+        providerName: skill-tier       # 可选，同层唯一。见「一个 profile 只挂一行」
         groups:
           - name: lark                  # 索引 skill 名，必须 kebab-case
             title: 飞书/Lark 全能力入口   # 索引正文的标题
@@ -74,7 +86,7 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `providerName` | | 注册进 DSH 的 provider 名，默认 `skill-index`。**同一层内必须唯一**，否则注册抛错（见下） |
+| `providerName` | | 注册进 DSH 的 provider 名，默认 `skill-tier`。**同一层内必须唯一**，否则注册抛错（见下） |
 | `groups[].name` | ✅ | 索引 skill 的名字；同时是**目录名之外**的唯一标识，必须 kebab-case |
 | `groups[].dir` | ✅ | 成员所在目录；支持 `~`。**不要**同时把它设成 DSH 扫描根，否则 `dsh-skill-filesystem` 也会发现成员，成本就回来了 |
 | `groups[].description` | ✅ | 进 catalog 的一句话。超过 500 字符会被 DSH 截断，插件会在配置阶段 warn |
@@ -93,9 +105,9 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
 ```yaml
 # ❌ 第二个实例会注册失败：provider 名在同一层重复
 - insert:
-    - id: skill-index-lark
+    - id: skill-tier-lark
       name: …/lib/index.js
-    - id: skill-index-gsd      # ← 这里会报 "already registered"，整个实例不激活
+    - id: skill-tier-gsd      # ← 这里会报 "already registered"，整个实例不激活
       name: …/lib/index.js
 ```
 
@@ -137,8 +149,8 @@ outright, and the rank order decides duplicates only within one layer*）。所�
 
 | 层 | 位置 | 作用范围 | 典型用途 |
 |---|---|---|---|
-| **entry 层** | profile 的 `cordis.patch.yml` 里 `skill-index` 那行的 `config.groups` | 该 profile 的所有会话 | 全局都想带的集合 |
-| **工作区层** | `<cwd>/.dsh/skill-index.json` | **只对在这个目录开的会话** | 「只有我打开飞书工作目录时才带飞书索引」 |
+| **entry 层** | profile 的 `cordis.patch.yml` 里 `skill-tier` 那行的 `config.groups` | 该 profile 的所有会话 | 全局都想带的集合 |
+| **工作区层** | `<cwd>/.dsh/skill-tier.json` | **只对在这个目录开的会话** | 「只有我打开飞书工作目录时才带飞书索引」 |
 
 工作区层的文件形状和 entry 层一样：
 
@@ -162,13 +174,13 @@ outright, and the rank order decides duplicates only within one layer*）。所�
 **这就是「装一次、按工作区生效」**：
 
 ```
-~/code/my-project/          没有 .dsh/skill-index.json → 0 开销
-~/work/feishu/              .dsh/skill-index.json 声明 lark → +95 tokens
+~/code/my-project/          没有 .dsh/skill-tier.json → 0 开销
+~/work/feishu/              .dsh/skill-tier.json 声明 lark → 只多一条索引（+78 ~ +121）
 ```
 
 工作区层**刻意不缓存**：`list()` 每个会话只调一两次，重读一个小 JSON 的成本可以忽略，而缓存会带来「改了配置不生效」的坑 —— 正是本插件在成员扫描上极力避免的那类问题。
 
-> 只认 `<cwd>/.dsh/skill-index.json`，**不向上查找**。要在子目录也生效，把文件放在你实际打开的那个目录。
+> 只认 `<cwd>/.dsh/skill-tier.json`，**不向上查找**。要在子目录也生效，把文件放在你实际打开的那个目录。
 
 ## 它到底改了什么
 
@@ -224,20 +236,26 @@ outright, and the rank order decides duplicates only within one layer*）。所�
 
 ## 验证过的数字
 
-指标 = `inputTokens + cacheReadTokens`（**不要**只看 `inputTokens`，那只是未命中缓存的部分）。同一个 trivial prompt，`dsh --profile <p> --json "只回复 OK"`：
+指标 = `inputTokens + cacheReadTokens`（**不要**只看 `inputTokens`，那只是未命中缓存的部分）。同一个 trivial prompt：
 
 | 场景 | prompt tokens | Δ |
 |---|---|---|
-| 纯 headless 基线（无该技能集合） | 5,695 | — |
-| **装本插件**，28 个成员折成 1 条索引 | **5,790** | **+95** |
-| 不装插件，28 个成员直接放项目扫描根 | 8,596 | +2,901 |
+| 纯 headless 基线（会话里没有该技能集合） | 5,695 | — |
+| **装本插件 + `--patch examples/lark.yml`**，28 个成员折成 1 条索引 | **5,814** | **+119** |
+| 不装插件，28 个成员直接放项目扫描根 | 8,596 | **+2,901** |
+
+索引那一条的成本取决于它的 `description` 有多长，实测区间 **+78 ~ +121**（+78 是 83 个成员的 gsd 组）。
 
 复现（成员目录必须**不是** DSH 扫描根）：
 
 ```bash
-mkdir -p /tmp/larktest/.dsh && ln -s ~/.dsh/lark-skills /tmp/larktest/.dsh/skills   # ← 这是"旧做法"的对照组
-dsh --profile <装了插件的> --json "只回复 OK"    # 期望 ≈ 基线 + 95
-dsh --profile <没装插件的> --json "只回复 OK"    # 对照组 ≈ 基线 + 2900
+# 对照组：28 个成员作为项目扫描根（旧做法）
+mkdir -p /tmp/larktest/.dsh && ln -s ~/.dsh/lark-skills /tmp/larktest/.dsh/skills
+cd /tmp/larktest && dsh --profile headless --json "只回复 OK"        # 期望 ≈ 8596
+
+# 本插件：同一个集合折成 1 条索引
+cd /tmp && dsh --profile <装了包的> --patch examples/lark.yml --json "只回复 OK"   # 期望 ≈ 5814
+cd /tmp && dsh --profile headless --json "只回复 OK"                              # 基线 ≈ 5695
 ```
 
 ⚠️ **验证时最常见的错误**：把同一个目录既设成项目扫描根、又配给插件。那样 `dsh-skill-filesystem` 会照常列出全部成员（rank 100 赢过插件的 rank 350），插件看起来"没生效"。成员目录要么给插件读，要么作扫描根，**不能两头都占**。
@@ -245,7 +263,7 @@ dsh --profile <没装插件的> --json "只回复 OK"    # 对照组 ≈ 基线 
 ## 测试
 
 ```bash
-node test/skill-index.test.mjs     # 29 个用例，无框架依赖
+node test/skill-tier.test.mjs     # 29 个用例，无框架依赖
 ```
 
 覆盖：frontmatter 解析（引号/冒号/块标量/BOM/多行普通标量）、可见性合成、索引正文生成、**原地内容改写后缓存失效**、成员增删、非法集合名/成员名、目录不可读、`~` 展开、超长描述告警、`!` 排除、目录恢复、卸载后停止产出、未配置时的行为、**provider 名（默认/显式/非法回退/保留名回退）**、**注册冲突被翻译成可操作报错**、**默认档位 350**、**工作区层新增/覆盖/按 cwd 隔离/坏 JSON 只告警一次/覆盖 revalidateMs**。
@@ -265,7 +283,7 @@ node test/skill-index.test.mjs     # 29 个用例，无框架依赖
 [`PKUfudawei/dsh-capability-menu`](https://github.com/PKUfudawei/dsh-capability-menu) 是更全的能力分层插件（tool + skill 三档 + Web UI）。两者不是竞品而是**上下游**：
 
 ```
-skill-index（provider 层）   让一个不在扫描根里的目录变成 ctx.skills 里的技能
+skill-tier（provider 层）   让一个不在扫描根里的目录变成 ctx.skills 里的技能
         ↓
 capability-menu（policy 层）     决定这些技能在 catalog 里露多少
 ```

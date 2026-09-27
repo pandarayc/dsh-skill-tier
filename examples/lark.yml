@@ -1,11 +1,13 @@
-# 用 --patch 直接挂载（不改 profile）：
-#   dsh --profile web --patch examples/lark.yml --dump-config | grep -A2 skill-index
+# 配合 --patch 使用（先用 dsh plugin add 装上包）：
+#   dsh --profile headless --patch examples/lark.yml "只回复 OK"
 #
-# 或先装包、再把下面 config 部分写进 profile 的 cordis.patch.yml：
-#   dsh plugin --profile web add /data/project/dsh-plugin/dsh-skill-index
+# 还没装包时，把下面 name 里的包名换成你的 clone 路径：
+#   sed "s|'@pandarayc/dsh-skill-tier'|'$PWD/lib/index.js'|" examples/lark.yml > /tmp/lark.local.yml
+#
+# 也可以只把下面的 config 部分写进 profile 的 cordis.patch.yml 长期生效。
 - insert:
-    - id: skill-index
-      name: /data/project/dsh-plugin/dsh-skill-index/lib/index.js
+    - id: skill-tier
+      name: '@pandarayc/dsh-skill-tier'
       config:
         groups:
           - name: lark

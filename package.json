@@ -1,5 +1,5 @@
 {
-  "name": "@pandarayc/dsh-skill-index",
+  "name": "@pandarayc/dsh-skill-tier",
   "version": "0.1.0",
   "description": "Progressive disclosure for DSH skill collections: one generated index skill stays in the catalog, every member stays user-invocable but leaves the model catalog. Zero dependencies.",
   "license": "MIT",
@@ -12,6 +12,7 @@
   },
   "files": [
     "lib",
+    "examples",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -22,7 +23,7 @@
     }
   },
   "scripts": {
-    "test": "node test/skill-index.test.mjs"
+    "test": "node test/skill-tier.test.mjs"
   },
   "keywords": [
     "dsh",
@@ -35,11 +36,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pandarayc/dsh-skill-index.git"
+    "url": "git+https://github.com/pandarayc/dsh-skill-tier.git"
   },
-  "homepage": "https://github.com/pandarayc/dsh-skill-index",
+  "homepage": "https://github.com/pandarayc/dsh-skill-tier",
   "bugs": {
-    "url": "https://github.com/pandarayc/dsh-skill-index/issues"
+    "url": "https://github.com/pandarayc/dsh-skill-tier/issues"
   },
   "publishConfig": {
     "access": "public",
