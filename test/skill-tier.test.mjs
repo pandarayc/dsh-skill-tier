@@ -7,13 +7,12 @@
  * 每个用例自带临时目录，跑完自清。
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   apply,
   parseFrontmatter,
-  shortHint,
   normalizeGroups,
   explainRegistrationFailure,
   DEFAULT_PROVIDER_NAME,
