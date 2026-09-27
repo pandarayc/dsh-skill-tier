@@ -2,10 +2,10 @@
 #   dsh --profile web --patch examples/lark.yml --dump-config | grep -A2 skill-index
 #
 # 或先装包、再把下面 config 部分写进 profile 的 cordis.patch.yml：
-#   dsh plugin --profile web add /data/project/dsh-plugin
+#   dsh plugin --profile web add /data/project/dsh-plugin/packages/skill-index
 - insert:
     - id: skill-index
-      name: /data/project/dsh-plugin/lib/index.js
+      name: /data/project/dsh-plugin/packages/skill-index/lib/index.js
       config:
         groups:
           - name: lark

@@ -1,7 +1,7 @@
 # 同 examples/lark.yml，只是换成一个 83 个成员的英文技能集合。
 - insert:
     - id: skill-index
-      name: /data/project/dsh-plugin/lib/index.js
+      name: /data/project/dsh-plugin/packages/skill-index/lib/index.js
       config:
         groups:
           - name: gsd
