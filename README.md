@@ -6,7 +6,7 @@ DSH 的 skill 目录（catalog）是**每个会话每一轮都携带**的常驻�
 
 | 技能集合 | 成员数 | 常驻开销 |
 |---|---|---|
-| lark-*（飞书 CLI 内嵌） | 28 | **+2,890 tokens**（基础 prompt 的 50%） |
+| lark-*（飞书 CLI 内嵌） | 28 | **+2,901 tokens**（基础 prompt 的 51%） |
 | gsd-*（`~/.claude/skills`） | 83 | **+2,047 tokens** |
 
 本插件把一个技能集合折成三层：
@@ -17,7 +17,7 @@ Tier 1  模型加载索引     拿到该集合全部成员的路由表（4 KB �
 Tier 2  按路由取正文     只读真正要用的那 1–2 个成员全文          ← 精确命中才付
 ```
 
-**实测削减 96%**（28 个：2,890 → 119；83 个：2,047 → 78），且**保留模型自主发现能力** —— 且成员仍然可以被你 `/成员名` 直接点名加载。
+**实测削减 96.7%**（28 个成员：**2,901 → 95 tokens**），且**保留模型自主发现能力** —— 成员仍然可以被你 `/成员名` 直接点名加载。
 
 ## 安装
 
@@ -98,6 +98,26 @@ dsh --profile web --patch examples/lark.yml --json "只回复 OK"
 - **不调 `control.invalidate()`。** 会把注册表缓存全部作废，在 `list()` 内部调用会形成"发现 → 作废 → 再发现"的自激。惰性校验已经满足正确性。
 - **成员名必须 kebab-case。** 一个坏名字（如 `gsd-extract_learnings` 含下划线）会让注册表**整体**报错。插件会跳过并 warn。
 - **零依赖。** 只用 `node:fs/promises`、`node:crypto`、`node:path`、`node:os`。
+
+## 验证过的数字
+
+指标 = `inputTokens + cacheReadTokens`（**不要**只看 `inputTokens`，那只是未命中缓存的部分）。同一个 trivial prompt，`dsh --profile <p> --json "只回复 OK"`：
+
+| 场景 | prompt tokens | Δ |
+|---|---|---|
+| 纯 headless 基线（无该技能集合） | 5,695 | — |
+| **装本插件**，28 个成员折成 1 条索引 | **5,790** | **+95** |
+| 不装插件，28 个成员直接放项目扫描根 | 8,596 | +2,901 |
+
+复现（成员目录必须**不是** DSH 扫描根）：
+
+```bash
+mkdir -p /tmp/larktest/.dsh && ln -s ~/.dsh/lark-skills /tmp/larktest/.dsh/skills   # ← 这是"旧做法"的对照组
+dsh --profile <装了插件的> --json "只回复 OK"    # 期望 ≈ 基线 + 95
+dsh --profile <没装插件的> --json "只回复 OK"    # 对照组 ≈ 基线 + 2900
+```
+
+⚠️ **验证时最常见的错误**：把同一个目录既设成项目扫描根、又配给插件。那样 `dsh-skill-filesystem` 会照常列出全部成员（rank 100 赢过插件的 rank 300），插件看起来"没生效"。成员目录要么给插件读，要么作扫描根，**不能两头都占**。
 
 ## 测试
 
