@@ -197,7 +197,30 @@ outright, and the rank order decides duplicates only within one layer*）。所�
 - **成员名必须 kebab-case。** 一个坏名字（如 `gsd-extract_learnings` 含下划线）会让注册表**整体**报错。插件会跳过并 warn。
 - **provider 名同层唯一。** 重名时注册表直接抛错、整个实例不激活，而 dsh 只打印一行 `did not activate`。插件把那个错误翻译成「一个 profile 只挂一行 / 用 `providerName` 区分」的提示。
 - **默认档位 350，不与 `customSkillDirs` 的 300 平手。** 同 rank 由 provider 注册顺序决定，不可预期。
+- **刻意不碰 `agent/pre-step` 的 catalog 消息。** 见下。
 - **零依赖。** 只用 `node:fs/promises`、`node:crypto`、`node:path`、`node:os`。
+
+### 为什么不做「过滤 catalog」那一层
+
+「把成员从 `<available_skills>` 里删掉」听起来更直接，但那要靠 `agent/pre-step` 里重写
+`source.kind === 'skill-catalog'` 的消息。实测（2026-09-27，DSH 0.1.7-rc.2）这条路有个
+**静默失效**的坑：
+
+`dsh-tool-skill` 自己的 catalog hook 是 `const decision = await next()` **之后**才把 catalog
+追加进 `decision.messages`。而 cordis 的 waterfall 是**先注册的在最外层**，注册顺序又等于
+**激活顺序**（带 `inject` 的插件要等依赖就绪才激活），跟配置里的先后无关。于是：
+
+```
+实测同一条 agent/pre-step 链（外层 → 内层）
+  i1 探针（无 inject）   i3,i4 dsh-tool-skill   i6 capability-menu-policy
+```
+
+`capability-menu` 在 i6（内层），它 filter 的时候 catalog 还没被追加 → **白过滤**。
+对照实验：在外层放一个做同样 filter 的监听器，catalog 立刻 6 → 4 条。它是**分类没错、位置错了**。
+
+所以本插件走另一条路：成员设 `invocation.modelInvocable = false`，让**上游的 catalog 构建器
+自己**把它们排除掉（`dsh-tool-skill` 里的 `filter(isModelInvocable)`）。这是上游明确定义的契约，
+既不依赖 hook 顺序，也不需要接管别人的消息。
 
 ## 验证过的数字
 
