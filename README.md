@@ -58,6 +58,7 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
       name: /data/project/dsh-plugin/dsh-skill-index/lib/index.js
       config:
         revalidateMs: 0                 # 可选，见下
+        providerName: skill-index       # 可选，同层唯一。见「一个 profile 只挂一行」
         groups:
           - name: lark                  # 索引 skill 名，必须 kebab-case
             title: 飞书/Lark 全能力入口   # 索引正文的标题
@@ -67,12 +68,13 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
             detailHint: "lark-cli skills read <成员名>"   # 可选：正文里教模型怎么取全文
             rules:                      # 可选：追加到正文的规则
               - "任何飞书操作前先读 lark-shared"
-            rank: 300                   # 可选，同名冲突优先级，越小越优先（默认 300）
+            rank: 350                   # 可选，越小越优先（默认 350）。见「优先级」
             source: custom              # 可选，默认 custom
 ```
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
+| `providerName` | | 注册进 DSH 的 provider 名，默认 `skill-index`。**同一层内必须唯一**，否则注册抛错（见下） |
 | `groups[].name` | ✅ | 索引 skill 的名字；同时是**目录名之外**的唯一标识，必须 kebab-case |
 | `groups[].dir` | ✅ | 成员所在目录；支持 `~`。**不要**同时把它设成 DSH 扫描根，否则 `dsh-skill-filesystem` 也会发现成员，成本就回来了 |
 | `groups[].description` | ✅ | 进 catalog 的一句话。超过 500 字符会被 DSH 截断，插件会在配置阶段 warn |
@@ -83,6 +85,51 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
 | `revalidateMs` | | 默认 `0` = 每次 `list()` 都按**内容哈希**校验一遍。见下 |
 
 成员文件格式与 `dsh-skill-filesystem` 一致：`<dir>/<name>/SKILL.md`，或平铺的 `<dir>/<name>.md`。
+
+### 一个 profile 只挂一行
+
+多个技能集合写在**同一个 `config.groups`** 下，不要用两个 entry id 挂两遍本插件：
+
+```yaml
+# ❌ 第二个实例会注册失败：provider 名在同一层重复
+- insert:
+    - id: skill-index-lark
+      name: …/lib/index.js
+    - id: skill-index-gsd      # ← 这里会报 "already registered"，整个实例不激活
+      name: …/lib/index.js
+```
+
+DSH 的 skill 注册表在**同一层**遇到同名 provider 会直接抛错，第二个实例整个不激活 ——
+表面现象只是一行 `warning: 1 entry did not activate`。插件会把那个原始错误翻译成一句
+可操作的提示。确实需要挂多行时，给每一行不同的 `providerName`。
+
+> `--patch` 叠加是安全的：patch 层按 entry `id` 去重、后层覆盖。所以在**已经装了包**的
+> profile 上再 `--patch examples/lark.yml` 不会双注册，而是用 patch 里的 config 覆盖已装的那行。
+
+### 优先级（rank）
+
+`rank` 越小越优先。DSH 各来源的档位：
+
+| rank | 来源 |
+|---|---|
+| 100 | `<projectRoot>/.dsh/skills` |
+| 200 | `<projectRoot>/.agents/skills` |
+| 250 | 运行时注册（`ctx.skills.register`） |
+| 300 | profile 的 `customSkillDirs` |
+| **350** | **本插件默认** |
+| 400 | `~/.dsh/skills` |
+| 500 | `~/.agents/skills` |
+| 600 | DSH 内置 |
+
+默认 350 的意图是**不遮蔽项目级与 `customSkillDirs`**。之所以不用 300：与
+`customSkillDirs` 同档时胜负由 provider 注册顺序决定，对使用者不可预期。
+
+⚠️ 这条只对**同一层**内的重名生效。注册表按 scope 分层，跨层时**就近那层整条胜出**、
+rank 不参与比较（`dsh-skill` 注册表注释：*the nearest layer's entry wins a duplicate name
+outright, and the rank order decides duplicates only within one layer*）。所以「装在 profile 里」
+和「挂在 agent preset 里」行为不同。
+
+想让本插件**永远不遮蔽任何既有来源**，显式设 `rank: 700`（> 600）。
 
 ### 两层配置
 
@@ -148,6 +195,8 @@ cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录�
 - **不挂 `fs.watch`。** 成员内容是原地改写，`fs.watch` 在深度 1 上看不到子目录内的文件变更；为 80+ 个成员各挂一个 watcher 不划算。
 - **不调 `control.invalidate()`。** 会把注册表缓存全部作废，在 `list()` 内部调用会形成"发现 → 作废 → 再发现"的自激。惰性校验已经满足正确性。
 - **成员名必须 kebab-case。** 一个坏名字（如 `gsd-extract_learnings` 含下划线）会让注册表**整体**报错。插件会跳过并 warn。
+- **provider 名同层唯一。** 重名时注册表直接抛错、整个实例不激活，而 dsh 只打印一行 `did not activate`。插件把那个错误翻译成「一个 profile 只挂一行 / 用 `providerName` 区分」的提示。
+- **默认档位 350，不与 `customSkillDirs` 的 300 平手。** 同 rank 由 provider 注册顺序决定，不可预期。
 - **零依赖。** 只用 `node:fs/promises`、`node:crypto`、`node:path`、`node:os`。
 
 ## 验证过的数字
@@ -168,15 +217,15 @@ dsh --profile <装了插件的> --json "只回复 OK"    # 期望 ≈ 基线 + 9
 dsh --profile <没装插件的> --json "只回复 OK"    # 对照组 ≈ 基线 + 2900
 ```
 
-⚠️ **验证时最常见的错误**：把同一个目录既设成项目扫描根、又配给插件。那样 `dsh-skill-filesystem` 会照常列出全部成员（rank 100 赢过插件的 rank 300），插件看起来"没生效"。成员目录要么给插件读，要么作扫描根，**不能两头都占**。
+⚠️ **验证时最常见的错误**：把同一个目录既设成项目扫描根、又配给插件。那样 `dsh-skill-filesystem` 会照常列出全部成员（rank 100 赢过插件的 rank 350），插件看起来"没生效"。成员目录要么给插件读，要么作扫描根，**不能两头都占**。
 
 ## 测试
 
 ```bash
-node test/skill-index.test.mjs     # 24 个用例，无框架依赖
+node test/skill-index.test.mjs     # 29 个用例，无框架依赖
 ```
 
-覆盖：frontmatter 解析（引号/冒号/块标量/BOM/多行普通标量）、可见性合成、索引正文生成、**原地内容改写后缓存失效**、成员增删、非法集合名/成员名、目录不可读、`~` 展开、超长描述告警、`!` 排除、目录恢复、卸载后停止产出、未配置时的行为、**工作区层新增/覆盖/按 cwd 隔离/坏 JSON 只告警一次/覆盖 revalidateMs**。
+覆盖：frontmatter 解析（引号/冒号/块标量/BOM/多行普通标量）、可见性合成、索引正文生成、**原地内容改写后缓存失效**、成员增删、非法集合名/成员名、目录不可读、`~` 展开、超长描述告警、`!` 排除、目录恢复、卸载后停止产出、未配置时的行为、**provider 名（默认/显式/非法回退/保留名回退）**、**注册冲突被翻译成可操作报错**、**默认档位 350**、**工作区层新增/覆盖/按 cwd 隔离/坏 JSON 只告警一次/覆盖 revalidateMs**。
 
 ## 边界
 
@@ -186,6 +235,7 @@ node test/skill-index.test.mjs     # 24 个用例，无框架依赖
 | glob 只支持 `*` 和 `!` | 没有 `?` / `{}` / `**` |
 | 每个 dsh 进程一份内存缓存 | 多进程各扫一遍（8 ms），不值得为此引入共享缓存 |
 | `SkillProvider` 接口是 0.1.x | DSH 还在 rc。插件只依赖 `registerProvider` + `SkillCandidate` 两个概念 |
+| 一个 profile 只能挂一行 | 同层 provider 名必须唯一。多个集合写在一个 `config.groups` 下；确实要多行时用 `providerName` 区分 |
 
 ## 与 capability-menu 的关系
 

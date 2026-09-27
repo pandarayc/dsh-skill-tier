@@ -3,6 +3,11 @@
 # Installing this package mounts one plugin row. Give that row a `config.groups`
 # entry per skill collection you want folded into an index — see README「配置」.
 #
+# One row per profile: mount this plugin once and list every collection under the
+# same `config.groups`. Mounting it twice (two entry ids) fails, because a skill
+# provider name must be unique within a layer; if you really need two rows, give
+# them different `config.providerName`.
+#
 # Without `config.groups` the plugin registers nothing (and says so at info
 # level), so an unconfigured install is inert rather than broken.
 - insert:
@@ -10,6 +15,7 @@
       name: '@pandarayc/dsh-skill-index'
       # config:
       #   revalidateMs: 0          # 0 = 每次 list() 都按内容哈希校验（默认）
+      #   providerName: skill-index # 可选：同层唯一
       #   groups:
       #     - name: lark           # 索引 skill 名，必须 kebab-case
       #       title: 飞书/Lark 全能力入口
@@ -19,5 +25,5 @@
       #       detailHint: "lark-cli skills read <成员名>"
       #       rules:
       #         - "任何飞书操作前先读 lark-shared"
-      #       rank: 300
+      #       rank: 350                   # 越小越优先；默认 350，只对同层重名生效
       #       source: custom

@@ -2,7 +2,7 @@
 /**
  * skill-index 的行为测试。刻意不依赖任何测试框架：node --test 或直接 node 跑都行。
  *
- *   node plugins/skill-index.test.mjs
+ *   node test/skill-index.test.mjs
  *
  * 每个用例自带临时目录，跑完自清。
  */
@@ -10,7 +10,15 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { apply, parseFrontmatter, shortHint } from '../lib/index.js';
+import {
+  apply,
+  parseFrontmatter,
+  shortHint,
+  normalizeGroups,
+  explainRegistrationFailure,
+  DEFAULT_PROVIDER_NAME,
+  DEFAULT_RANK,
+} from '../lib/index.js';
 
 // ── 极小测试框架 ──────────────────────────────────────────────────────
 const results = [];
@@ -48,14 +56,19 @@ function writeSkill(dir, name, { description = 'D', body = '# body\n', extra = '
 }
 
 /** 用假 ctx 挂载插件，拿到它注册的 provider。 */
-function mount(groups) {
+function mount(groups, extra = {}) {
   let provider;
   const warnings = [];
   const ctx = {
-    skills: { registerProvider: (create) => { provider = create({ signal: undefined, invalidate: () => {} }); return () => {}; } },
+    skills: {
+      registerProvider: (create) => {
+        provider = create({ signal: undefined, invalidate: () => {} });
+        return () => {};
+      },
+    },
     logger: { warn: (m) => warnings.push(String(m)), info: () => {} },
   };
-  apply(ctx, { groups });
+  apply(ctx, { groups, ...extra });
   return { provider, warnings };
 }
 
@@ -348,6 +361,97 @@ await testAsync('显式写了 groups 但全无效时要 warn', async () => {
     { groups: [{ name: 'bad_name', dir: '/tmp' }] },
   );
   ok(warnings.some((m) => m.includes('没有有效条目')), '配置错误应有 warn', JSON.stringify(warnings));
+});
+
+// ─────────────── provider 名与默认档位（同层重名 / rank 平手） ───────────────
+
+test('默认 rank 是 350 —— 避开与 customSkillDirs 的 300 平手', () => {
+  eq(DEFAULT_RANK, 350, 'DEFAULT_RANK 常量');
+  const def = normalizeGroups({ groups: [{ name: 'g', dir: '/tmp' }] }, () => {});
+  eq(def[0].rank, DEFAULT_RANK, '未指定时用默认档位');
+  const explicit = normalizeGroups({ groups: [{ name: 'g', dir: '/tmp', rank: 700 }] }, () => {});
+  eq(explicit[0].rank, 700, '显式 rank 生效');
+  const zero = normalizeGroups({ groups: [{ name: 'g', dir: '/tmp', rank: 0 }] }, () => {});
+  eq(zero[0].rank, 0, 'rank 允许 0（最高优先级）');
+});
+
+test('providerName：默认值 / 显式值 / 非法值回退 / 保留名回退', () => {
+  const store = tmp();
+  try {
+    const g = [{ name: 'grp', title: 'g', description: 'g', dir: store }];
+    eq(mount(g).provider.name, DEFAULT_PROVIDER_NAME, '默认 provider 名');
+
+    const named = mount(g, { providerName: 'skill-index-lark' });
+    eq(named.provider.name, 'skill-index-lark', '显式 provider 名生效');
+    ok(named.provider.list, '仍然产出 provider');
+
+    const badName = mount(g, { providerName: 'Bad_Name' });
+    eq(badName.provider.name, DEFAULT_PROVIDER_NAME, '非 kebab-case 回退默认名');
+    ok(badName.warnings.some((w) => w.includes('providerName') && w.includes('kebab-case')), '非法名有告警', JSON.stringify(badName.warnings));
+
+    const reserved = mount(g, { providerName: 'runtime' });
+    eq(reserved.provider.name, DEFAULT_PROVIDER_NAME, '保留名 runtime 回退默认名');
+    ok(reserved.warnings.some((w) => w.includes('保留名')), '保留名有告警', JSON.stringify(reserved.warnings));
+
+    const empty = mount(g, { providerName: '' });
+    eq(empty.provider.name, DEFAULT_PROVIDER_NAME, '空串回退默认名');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test('注册表报「已注册」时翻译成可操作的提示（保留原因）', () => {
+  const raw = new Error('a skill provider named "skill-index" is already registered in this scope');
+  const translated = explainRegistrationFailure(raw, 'skill-index');
+  ok(translated !== raw, '应换成一个新错误而不是原样抛出');
+  ok(translated.message.includes('只应挂一行'), '要说清正确写法', translated.message);
+  ok(translated.message.includes('providerName'), '要给出多行场景的替代方案');
+  ok(translated.message.includes('原始错误'), '要保留原始信息');
+  eq(translated.cause, raw, '保留原始错误对象');
+
+  const unrelated = new Error('boom');
+  eq(explainRegistrationFailure(unrelated, 'x'), unrelated, '无关错误原样返回');
+});
+
+test('同一 profile 挂两行 → apply 抛出可操作的报错，而不是裸的注册表错误', () => {
+  const warnings = [];
+  const ctx = {
+    skills: {
+      registerProvider: () => {
+        throw new Error('a skill provider named "skill-index" is already registered');
+      },
+    },
+    logger: { warn: (m) => warnings.push(String(m)), info: () => {} },
+  };
+  let caught;
+  try {
+    apply(ctx, { providerName: 'skill-index' });
+  } catch (e) {
+    caught = e;
+  }
+  ok(caught, '应抛出');
+  ok(caught?.message.includes('只应挂一行'), '报错要给出修法', caught?.message);
+  ok(caught?.message.includes('skill-index'), '报错要点出冲突的名字');
+  ok(caught?.cause, '保留原始错误');
+});
+
+test('与 provider 名无关的注册失败应原样抛出，不被改写', () => {
+  const boom = new Error('磁盘炸了');
+  const ctx = {
+    skills: {
+      registerProvider: () => {
+        throw boom;
+      },
+    },
+    logger: { warn: () => {}, info: () => {} },
+  };
+  let caught;
+  try {
+    apply(ctx, {});
+  } catch (e) {
+    caught = e;
+  }
+  eq(caught, boom, '无关错误应原样抛出');
 });
 
 // ───────────────────────── 工作区层（.dsh/skill-index.json） ─────────────────────────
