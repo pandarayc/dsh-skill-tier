@@ -1,4 +1,0 @@
-packages:
-  - packages/*
-
-# DSH 的 profile 用 hoisted；插件仓这边保持默认即可，插件本身零依赖。
