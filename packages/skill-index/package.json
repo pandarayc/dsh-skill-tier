@@ -1,5 +1,5 @@
 {
-  "name": "dsh-skill-index",
+  "name": "@pandarayc/dsh-skill-index",
   "version": "0.1.0",
   "description": "Progressive disclosure for DSH skill collections: one generated index skill stays in the catalog, every member stays user-invocable but leaves the model catalog. Zero dependencies.",
   "license": "MIT",
@@ -33,6 +33,19 @@
     "progressive-disclosure",
     "token-budget"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pandarayc/dsh-plugin.git",
+    "directory": "packages/skill-index"
+  },
+  "homepage": "https://github.com/pandarayc/dsh-plugin/tree/main/packages/skill-index",
+  "bugs": {
+    "url": "https://github.com/pandarayc/dsh-plugin/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=20"
   }

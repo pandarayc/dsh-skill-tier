@@ -314,18 +314,63 @@ function normalizeGroups(config, warn) {
   return out;
 }
 
+// ───────────────────────────── 工作区配置 ─────────────────────────────
+
+/** 工作区级配置文件的相对路径（相对会话 cwd）。 */
+const WORKSPACE_CONFIG_REL = join('.dsh', 'skill-index.json');
+
+/**
+ * 读一个工作区的 `.dsh/skill-index.json`。
+ *
+ * 返回解析后的对象，或 null（没有文件 / 读不动 / 格式不对）。
+ * **没有文件不是错误** —— 绝大多数工作区都不该有，所以静默返回 null；
+ * 只有文件存在但解析失败才 warn（按路径去重，不刷屏）。
+ */
+async function loadWorkspaceConfig(cwd, warnOnce) {
+  if (typeof cwd !== 'string' || cwd.length === 0) return null;
+  const file = join(cwd, WORKSPACE_CONFIG_REL);
+  let text;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    warnOnce(`ws-json:${file}`, `skill-index: 工作区配置 ${file} 不是合法 JSON（${error?.message ?? error}），已忽略`);
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    warnOnce(`ws-shape:${file}`, `skill-index: 工作区配置 ${file} 顶层必须是对象，已忽略`);
+    return null;
+  }
+  return parsed;
+}
+
+/** 合并 entry 层与工作区层的集合定义：**同名以工作区为准**。 */
+function mergeGroups(base, extra) {
+  const byName = new Map();
+  for (const g of base) byName.set(g.name, g);
+  for (const g of extra) byName.set(g.name, g);
+  return [...byName.values()];
+}
+
 // ───────────────────────────── provider ─────────────────────────────
 
-function createProvider(groups, logger, options = {}) {
+function createProvider(logger, options = {}) {
   const PROVIDER = 'skill-index';
   // control.signal 在插件卸载 / 注册失败时中止。回收后不该再做 I/O。
   const teardown = options.teardownSignal;
   const alive = () => !teardown?.aborted;
-  // 默认 0 = 每次 list() 都按目录签名校验一次。签名包含 mtime/size，所以内容变更立刻可见。
-  // 成员数特别大（数百）且实测 stat 成本明显时，才考虑调大；代价是变更在 TTL 内不可见。
-  const revalidateMs = Number.isFinite(options.revalidateMs) ? Number(options.revalidateMs) : 0;
+  /** entry 层（profile patch 里的 config.groups）。工作区层在其上叠加。 */
+  const baseGroups = options.baseGroups ?? [];
+  // 默认 0 = 每次 list() 都按目录签名校验一次。签名包含内容哈希，所以变更立刻可见。
+  // 成员数特别大（数百）且实测读取成本明显时，才考虑调大；代价是变更在 TTL 内不可见。
+  const baseRevalidateMs = Number.isFinite(options.baseRevalidateMs) ? Number(options.baseRevalidateMs) : 0;
 
-  /** group.name -> { signature, members, checkedAt } */
+  /** 已解析的成员目录（绝对路径） -> { signature, members, checkedAt }。按目录而不是按集合名，因为不同工作区可以给同名集合指向不同目录。 */
   const cache = new Map();
   const warnedOnce = new Set();
   const warnOnce = (key, message) => {
@@ -333,6 +378,23 @@ function createProvider(groups, logger, options = {}) {
     warnedOnce.add(key);
     logger?.warn?.(message);
   };
+  const warn = (m) => logger?.warn?.(`skill-index: ${m}`);
+
+  /**
+   * 解析某个 cwd 的生效配置 = entry 层 ⊕ 工作区层。
+   *
+   * 刻意**不缓存**：`list()` 每个会话只调一两次（实测 4 步会话 1 次），重读一个小
+   * JSON 的成本可以忽略，而缓存会带来「改了 .dsh/skill-index.json 不生效」的坑 ——
+   * 这正是本插件在成员扫描上极力避免的那类问题。
+   */
+  async function effective(cwd) {
+    const ws = await loadWorkspaceConfig(cwd, warnOnce);
+    const wsGroups = ws ? normalizeGroups(ws, warn) : [];
+    return {
+      groups: mergeGroups(baseGroups, wsGroups),
+      revalidateMs: Number.isFinite(ws?.revalidateMs) ? Number(ws.revalidateMs) : baseRevalidateMs,
+    };
+  }
 
   /**
    * 读一遍成员目录，返回 { dir, signature, members, skipped }。
@@ -347,8 +409,8 @@ function createProvider(groups, logger, options = {}) {
    * 不是每一步都调。83 个成员约 1.6MB，一次会话读一到两遍。
    */
   async function scanGroup(group) {
-    if (!alive()) return { dir: resolve(expandHome(group.dir)), signature: null, members: [], skipped: [] };
     const dir = resolve(expandHome(group.dir));
+    if (!alive()) return { dir, signature: null, members: [], skipped: [] };
     const accept = compileMemberFilter(group.members || '*');
 
     let entries;
@@ -375,7 +437,7 @@ function createProvider(groups, logger, options = {}) {
       .update(slots.map((s, i) => `${s.name}:${texts[i] === null ? '-' : createHash('sha1').update(texts[i]).digest('hex')}`).sort().join('\u0000'))
       .digest('hex');
 
-    const hit = cache.get(group.name);
+    const hit = cache.get(dir);
     if (hit && hit.signature === signature) {
       hit.checkedAt = Date.now();
       return hit; // 内容没变：跳过解析与索引重建
@@ -406,12 +468,13 @@ function createProvider(groups, logger, options = {}) {
     members.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
     const record = { dir, signature, members, skipped, checkedAt: Date.now() };
-    cache.set(group.name, record);
+    cache.set(dir, record);
     return record;
   }
 
-  async function membersOf(group, signal) {
-    const hit = cache.get(group.name);
+  async function membersOf(group, signal, revalidateMs) {
+    const dir = resolve(expandHome(group.dir));
+    const hit = cache.get(dir);
     // TTL 只用于跳过重新读取；默认 0 = 每次都读，保证内容变更立刻可见
     if (hit && Date.now() - hit.checkedAt < revalidateMs) return hit.members;
 
@@ -420,7 +483,7 @@ function createProvider(groups, logger, options = {}) {
 
     if (scanned.error) {
       warnOnce(
-        `dir:${group.name}`,
+        `dir:${dir}`,
         `skill-index: 集合 "${group.name}" 的目录不可读：${scanned.dir}（${scanned.error?.code ?? scanned.error}）` +
           ` —— 该集合不会出现在 catalog 里`,
       );
@@ -469,10 +532,11 @@ function createProvider(groups, logger, options = {}) {
     async list(options = {}) {
       const out = [];
       if (!alive()) return out;
+      const { groups, revalidateMs } = await effective(options.cwd);
       const owner = new Map(); // 成员名 -> 集合名，用于发现跨集合重名
       for (const group of groups) {
         options.signal?.throwIfAborted?.();
-        const members = await membersOf(group, options.signal);
+        const members = await membersOf(group, options.signal, revalidateMs);
 
         for (const m of members) {
           const prev = owner.get(m.name);
@@ -495,12 +559,13 @@ function createProvider(groups, logger, options = {}) {
     async get(candidate, options = {}) {
       if (!alive()) return undefined;
       const locator = candidate.locator;
+      const { groups, revalidateMs } = await effective(options.cwd);
       const group = groups.find((g) => g.name === locator?.groupName);
       if (!group) return undefined;
       options.signal?.throwIfAborted?.();
 
       if (locator.kind === 'router') {
-        const members = await membersOf(group, options.signal);
+        const members = await membersOf(group, options.signal, revalidateMs);
         if (members.length === 0) return undefined;
         return {
           name: group.name,
@@ -535,22 +600,38 @@ function createProvider(groups, logger, options = {}) {
 
 export function apply(ctx, config) {
   const warn = (m) => ctx.logger?.warn?.(`skill-index: ${m}`);
-  const groups = normalizeGroups(config, warn);
-  if (groups.length === 0) {
-    // 「还没配」和「配错了」是两回事：装了 bundle 但尚未写 groups 是正常中间态，用 info；
-    // 只有确实写了 groups 却一条都没通过校验，才是需要人介入的配置错误。
-    if (Array.isArray(config?.groups)) {
-      warn('config.groups 里没有有效条目，未注册任何 provider');
-    } else {
-      ctx.logger?.info?.('skill-index: 尚未配置 config.groups，未注册任何 provider');
-    }
-    return;
+  const baseGroups = normalizeGroups(config, warn);
+  // 写了 groups 却一条都没通过校验 = 配置错误，要人介入
+  if (Array.isArray(config?.groups) && baseGroups.length === 0) {
+    warn('config.groups 里没有有效条目');
   }
-  const providerOptions = { revalidateMs: config?.revalidateMs };
+
+  // **总是注册。** 即使 entry 层一个集合都没有，工作区层仍可能提供 —— 这正是
+  // 「装一次、按工作区生效」的前提。空 provider 的代价只是一次
+  // <cwd>/.dsh/skill-index.json 的读取，而它由注册表的 catalog 缓存挡住，
+  // 每个会话只发生一两次。
   ctx.skills.registerProvider((control) =>
-    createProvider(groups, ctx.logger, { ...providerOptions, teardownSignal: control?.signal }),
+    createProvider(ctx.logger, {
+      baseGroups,
+      baseRevalidateMs: config?.revalidateMs,
+      teardownSignal: control?.signal,
+    }),
   );
-  ctx.logger?.info?.(`skill-index: 已注册 ${groups.length} 个技能集合：${groups.map((g) => g.name).join(', ')}`);
+  ctx.logger?.info?.(
+    `skill-index: 已挂载（entry 层 ${baseGroups.length} 个集合` +
+      `${baseGroups.length ? '：' + baseGroups.map((g) => g.name).join(', ') : ''}` +
+      `；工作区层见 <cwd>/${WORKSPACE_CONFIG_REL}）`,
+  );
 }
 
-export { parseFrontmatter, shortHint, scanMembers, renderRouter, compileMemberFilter, normalizeGroups };
+export {
+  parseFrontmatter,
+  shortHint,
+  scanMembers,
+  renderRouter,
+  compileMemberFilter,
+  normalizeGroups,
+  loadWorkspaceConfig,
+  mergeGroups,
+  WORKSPACE_CONFIG_REL,
+};

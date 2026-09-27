@@ -1,4 +1,4 @@
-# dsh-skill-index
+# @pandarayc/dsh-skill-index
 
 > 让成千上万个 skill 不再每轮都躺在上下文里。**零依赖、单文件、不改源文件。**
 
@@ -22,20 +22,32 @@ Tier 2  按路由取正文     只读真正要用的那 1–2 个成员全文   
 ## 安装
 
 ```bash
-# 1) 装进 profile（bundle 形式，装完自动挂一行）
+# 装进 profile（bundle 形式，装完自动挂一行）
 dsh plugin --profile web add /data/project/dsh-plugin/packages/skill-index
 
-# 2) 给这一行加 config.groups —— 编辑 ~/.dsh/profiles/web/cordis.patch.yml
-#    （cordis.patch.yml 自带注释掉的模板，照抄改路径即可）
-
-# 3) 验证
+# 验证
 dsh --profile web --dump-config | grep -A3 skill-index
 ```
+
+**装完是惰性的**：没有配置任何集合时不产出候选、不占上下文。集合可以来自两层（见下）。
 
 不想装包、只想先试：
 
 ```bash
 dsh --profile web --patch examples/lark.yml --json "只回复 OK"
+```
+
+工作区用法（装完包之后）：
+
+```bash
+mkdir -p ~/work/feishu/.dsh
+cat > ~/work/feishu/.dsh/skill-index.json <<'JSON'
+{ "groups": [{ "name": "lark", "title": "飞书/Lark 全能力入口",
+  "description": "飞书/Lark 全能力入口（28 个子技能）…",
+  "dir": "~/.dsh/lark-skills", "members": "lark-*",
+  "detailHint": "lark-cli skills read <成员名>" }] }
+JSON
+cd ~/work/feishu && dsh --profile web    # 这个目录带索引；别的目录不带
 ```
 
 ## 配置
@@ -71,6 +83,45 @@ dsh --profile web --patch examples/lark.yml --json "只回复 OK"
 | `revalidateMs` | | 默认 `0` = 每次 `list()` 都按**内容哈希**校验一遍。见下 |
 
 成员文件格式与 `dsh-skill-filesystem` 一致：`<dir>/<name>/SKILL.md`，或平铺的 `<dir>/<name>.md`。
+
+### 两层配置
+
+配置有两个来源，**工作区层在同一名字上覆盖 entry 层**：
+
+| 层 | 位置 | 作用范围 | 典型用途 |
+|---|---|---|---|
+| **entry 层** | profile 的 `cordis.patch.yml` 里 `skill-index` 那行的 `config.groups` | 该 profile 的所有会话 | 全局都想带的集合 |
+| **工作区层** | `<cwd>/.dsh/skill-index.json` | **只对在这个目录开的会话** | 「只有我打开飞书工作目录时才带飞书索引」 |
+
+工作区层的文件形状和 entry 层一样：
+
+```json
+{
+  "groups": [
+    {
+      "name": "lark",
+      "title": "飞书/Lark 全能力入口",
+      "description": "飞书/Lark 全能力入口（28 个子技能）…",
+      "dir": "~/.dsh/lark-skills",
+      "members": "lark-*",
+      "detailHint": "lark-cli skills read <成员名>"
+    }
+  ]
+}
+```
+
+也可以覆盖 `revalidateMs`。
+
+**这就是「装一次、按工作区生效」**：
+
+```
+~/code/my-project/          没有 .dsh/skill-index.json → 0 开销
+~/work/feishu/              .dsh/skill-index.json 声明 lark → +95 tokens
+```
+
+工作区层**刻意不缓存**：`list()` 每个会话只调一两次，重读一个小 JSON 的成本可以忽略，而缓存会带来「改了配置不生效」的坑 —— 正是本插件在成员扫描上极力避免的那类问题。
+
+> 只认 `<cwd>/.dsh/skill-index.json`，**不向上查找**。要在子目录也生效，把文件放在你实际打开的那个目录。
 
 ## 它到底改了什么
 
@@ -122,10 +173,10 @@ dsh --profile <没装插件的> --json "只回复 OK"    # 对照组 ≈ 基线 
 ## 测试
 
 ```bash
-node test/skill-index.test.mjs     # 18 个用例，无框架依赖
+node test/skill-index.test.mjs     # 24 个用例，无框架依赖
 ```
 
-覆盖：frontmatter 解析（引号/冒号/块标量/BOM/多行普通标量）、可见性合成、索引正文生成、**原地内容改写后缓存失效**、成员增删、非法集合名/成员名、目录不可读、`~` 展开、超长描述告警、`!` 排除、目录恢复、卸载后停止产出、未配置时保持安静。
+覆盖：frontmatter 解析（引号/冒号/块标量/BOM/多行普通标量）、可见性合成、索引正文生成、**原地内容改写后缓存失效**、成员增删、非法集合名/成员名、目录不可读、`~` 展开、超长描述告警、`!` 排除、目录恢复、卸载后停止产出、未配置时的行为、**工作区层新增/覆盖/按 cwd 隔离/坏 JSON 只告警一次/覆盖 revalidateMs**。
 
 ## 边界
 
@@ -141,7 +192,7 @@ node test/skill-index.test.mjs     # 18 个用例，无框架依赖
 [`PKUfudawei/dsh-capability-menu`](https://github.com/PKUfudawei/dsh-capability-menu) 是更全的能力分层插件（tool + skill 三档 + Web UI）。两者不是竞品而是**上下游**：
 
 ```
-dsh-skill-index（provider 层）   让一个不在扫描根里的目录变成 ctx.skills 里的技能
+skill-index（provider 层）   让一个不在扫描根里的目录变成 ctx.skills 里的技能
         ↓
 capability-menu（policy 层）     决定这些技能在 catalog 里露多少
 ```

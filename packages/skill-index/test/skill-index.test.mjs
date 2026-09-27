@@ -324,7 +324,7 @@ await testAsync('插件卸载（control.signal 中止）后不再产出候选', 
   }
 });
 
-await testAsync('未配置 groups 时保持安静（只有 info，不刷 warn）', async () => {
+await testAsync('未配置 groups 时仍然注册 provider（工作区层可能提供），且不刷 warn', async () => {
   let provider;
   const warnings = [];
   const infos = [];
@@ -335,9 +335,10 @@ await testAsync('未配置 groups 时保持安静（只有 info，不刷 warn）
     },
     { revalidateMs: 0 },
   );
-  eq(provider, undefined, '未配置时不注册 provider');
+  ok(provider, '未配置也要注册 provider（否则工作区配置永远不生效）');
+  eq((await provider.list({})).length, 0, '没有集合时不产出候选');
   eq(warnings.length, 0, '未配置不应产生 warn', JSON.stringify(warnings));
-  ok(infos.some((m) => m.includes('尚未配置')), '应给出 info 提示', JSON.stringify(infos));
+  ok(infos.some((m) => m.includes('工作区层')), 'info 里应提到工作区层', JSON.stringify(infos));
 });
 
 await testAsync('显式写了 groups 但全无效时要 warn', async () => {
@@ -347,6 +348,128 @@ await testAsync('显式写了 groups 但全无效时要 warn', async () => {
     { groups: [{ name: 'bad_name', dir: '/tmp' }] },
   );
   ok(warnings.some((m) => m.includes('没有有效条目')), '配置错误应有 warn', JSON.stringify(warnings));
+});
+
+// ───────────────────────── 工作区层（.dsh/skill-index.json） ─────────────────────────
+
+/** 在 cwd 下写一个工作区配置文件。 */
+function writeWorkspace(cwd, content) {
+  mkdirSync(join(cwd, '.dsh'), { recursive: true });
+  writeFileSync(join(cwd, '.dsh', 'skill-index.json'), typeof content === 'string' ? content : JSON.stringify(content, null, 2));
+}
+
+await testAsync('工作区配置能新增集合', async () => {
+  const store = tmp();
+  const ws = tmp();
+  try {
+    writeSkill(store, 'lark-doc', { description: '云文档' });
+    writeWorkspace(ws, { groups: [{ name: 'lark', title: '飞书', description: '飞书入口', dir: store, members: 'lark-*' }] });
+    const { provider } = mount([]);                       // entry 层为空
+    eq((await provider.list({})).length, 0, '不带 cwd 时看不到工作区集合');
+    const cands = await provider.list({ cwd: ws });
+    ok(cands.some((c) => c.name === 'lark'), '带 cwd 时应出现工作区集合');
+    ok(cands.some((c) => c.name === 'lark-doc'), '成员也应在');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+await testAsync('工作区配置按 cwd 隔离，互不影响', async () => {
+  const storeA = tmp();
+  const storeB = tmp();
+  const wsA = tmp();
+  const wsB = tmp();
+  try {
+    writeSkill(storeA, 'sa-one', { description: 'A 集合成员' });
+    writeSkill(storeB, 'sb-one', { description: 'B 集合成员' });
+    writeWorkspace(wsA, { groups: [{ name: 'sa', title: 'A', description: 'A 入口', dir: storeA, members: 'sa-*' }] });
+    writeWorkspace(wsB, { groups: [{ name: 'sb', title: 'B', description: 'B 入口', dir: storeB, members: 'sb-*' }] });
+    const { provider } = mount([]);
+    const a = await provider.list({ cwd: wsA });
+    const b = await provider.list({ cwd: wsB });
+    ok(a.some((c) => c.name === 'sa') && !a.some((c) => c.name === 'sb'), 'cwd A 只看到 A 的集合');
+    ok(b.some((c) => c.name === 'sb') && !b.some((c) => c.name === 'sa'), 'cwd B 只看到 B 的集合');
+  } finally {
+    for (const d of [storeA, storeB, wsA, wsB]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+await testAsync('同名集合以工作区层为准（覆盖 entry 层）', async () => {
+  const storeEntry = tmp();
+  const storeWs = tmp();
+  const ws = tmp();
+  try {
+    writeSkill(storeEntry, 'e-one', { description: '来自 entry 层' });
+    writeSkill(storeWs, 'w-one', { description: '来自工作区层' });
+    const { provider } = mount([
+      { name: 'grp', title: 'E', description: 'entry 入口', dir: storeEntry, members: '*' },
+    ]);
+    const before = await provider.get((await provider.list({ cwd: ws })).find((c) => c.name === 'grp'), {});
+    ok(before.content.includes('来自 entry 层'), '没有工作区配置时用 entry 层');
+
+    writeWorkspace(ws, { groups: [{ name: 'grp', title: 'W', description: '工作区入口', dir: storeWs, members: '*' }] });
+    const c = (await provider.list({ cwd: ws })).find((x) => x.name === 'grp');
+    const after = await provider.get(c, { cwd: ws });
+    ok(after.content.includes('来自工作区层'), '同名时工作区层覆盖 entry 层');
+    ok(!after.content.includes('来自 entry 层'), '不应残留 entry 层的成员');
+  } finally {
+    for (const d of [storeEntry, storeWs, ws]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+await testAsync('工作区配置 JSON 坏掉时只告警一次并忽略，不影响 entry 层', async () => {
+  const store = tmp();
+  const ws = tmp();
+  try {
+    writeSkill(store, 'grp-a', { description: 'A' });
+    writeWorkspace(ws, '{ 这不是 JSON');
+    const { provider, warnings } = mount([
+      { name: 'entry-grp', title: 'E', description: 'entry', dir: store, members: 'grp-*' },
+    ]);
+    const cands = await provider.list({ cwd: ws });
+    ok(cands.some((c) => c.name === 'entry-grp'), '坏掉的工作区配置不该影响 entry 层');
+    await provider.list({ cwd: ws });
+    const hits = warnings.filter((w) => w.includes('不是合法 JSON'));
+    eq(hits.length, 1, '同一个坏文件只告警一次', JSON.stringify(warnings));
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+await testAsync('工作区配置顶层不是对象时告警并忽略', async () => {
+  const ws = tmp();
+  try {
+    writeWorkspace(ws, '[1,2,3]');
+    const { provider, warnings } = mount([]);
+    eq((await provider.list({ cwd: ws })).length, 0, '不该产出候选');
+    ok(warnings.some((w) => w.includes('顶层必须是对象')), '应告警', JSON.stringify(warnings));
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+await testAsync('工作区可以覆盖 revalidateMs', async () => {
+  const store = tmp();
+  const ws = tmp();
+  try {
+    writeSkill(store, 'grp-a', { description: '旧描述AAAA' });
+    writeWorkspace(ws, {
+      revalidateMs: 60000,
+      groups: [{ name: 'grp', title: 'G', description: 'g', dir: store, members: 'grp-*' }],
+    });
+    const { provider } = mount([]);
+    const c1 = (await provider.list({ cwd: ws })).find((c) => c.name === 'grp');
+    await provider.get(c1, { cwd: ws });
+    writeSkill(store, 'grp-a', { description: '新描述BBBB' });
+    const c2 = (await provider.list({ cwd: ws })).find((c) => c.name === 'grp');
+    const body = (await provider.get(c2, { cwd: ws })).content;
+    ok(body.includes('旧描述AAAA'), 'TTL 内应命中缓存（这正是 revalidateMs>0 的语义）');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
+  }
 });
 
 // ── 汇总 ──────────────────────────────────────────────────────────────
